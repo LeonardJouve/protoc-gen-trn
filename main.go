@@ -19,7 +19,7 @@ func main() {
 }
 
 func generate(plugin *protogen.Plugin, in *protogen.File) error {
-	fileName := "GrpcModule.ts"
+	fileName := "grpcModule.ts"
 	out := plugin.NewGeneratedFile(fileName, in.GoImportPath)
 
 	out.P(`import {NativeModules} from 'react-native';
