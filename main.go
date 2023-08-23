@@ -4,7 +4,30 @@ import (
 	"strings"
 
 	"google.golang.org/protobuf/compiler/protogen"
+	"google.golang.org/protobuf/reflect/protoreflect"
 )
+
+var kinds = map[protoreflect.Kind]string{
+	protoreflect.BoolKind:     "boolean",
+	protoreflect.Int32Kind:    "number",
+	protoreflect.Sint32Kind:   "number",
+	protoreflect.Uint32Kind:   "number",
+	protoreflect.Int64Kind:    "number",
+	protoreflect.Sint64Kind:   "number",
+	protoreflect.Uint64Kind:   "number",
+	protoreflect.Sfixed32Kind: "number",
+	protoreflect.Fixed32Kind:  "number",
+	protoreflect.FloatKind:    "number",
+	protoreflect.Sfixed64Kind: "number",
+	protoreflect.Fixed64Kind:  "number",
+	protoreflect.DoubleKind:   "number",
+	protoreflect.StringKind:   "string",
+	// TODO: handle these
+	// protogen.EnumKind: ""
+	// protogen.BytesKind: "",
+	// protogen.MessageKind: "",
+	// protogen.GroupKind:   "",
+}
 
 func main() {
 	protogen.Options{}.Run(func(plugin *protogen.Plugin) error {
@@ -63,7 +86,16 @@ func generateMessage(message *protogen.Message, out *protogen.GeneratedFile) err
 	// TODO: handle nested messages
 
 	for _, field := range message.Fields {
-		lists["fieldTypes"] = append(lists["fieldTypes"], lower(field.Desc.Kind().String())) // TODO: typescript type
+		fieldKind := field.Desc.Kind()
+		fieldType, ok := kinds[fieldKind]
+		if !ok {
+			if fieldKind == protoreflect.MessageKind {
+				lists["fieldTypes"] = append(lists["fieldTypes"], upper(string(field.Message.Desc.Name())))
+				lists["fieldNames"] = append(lists["fieldNames"], lower(string(field.Desc.Name())))
+			}
+			continue
+		}
+		lists["fieldTypes"] = append(lists["fieldTypes"], fieldType)
 		lists["fieldNames"] = append(lists["fieldNames"], lower(string(field.Desc.Name())))
 	}
 
