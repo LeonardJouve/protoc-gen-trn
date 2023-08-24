@@ -11,12 +11,13 @@ service Greeter {
 
 message HelloRequest {
     string name = 1;
-    bool ok = 2;
-    Test cool = 3;
-}
-
-message Test {
-    string cool = 1;
+    message Test {
+        string test = 1;
+        message Cool {
+            string cool = 1;
+        }
+    }
+    Test ok = 2;
 }
 
 message HelloResponse {

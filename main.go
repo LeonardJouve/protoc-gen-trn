@@ -7,6 +7,20 @@ import (
 	"google.golang.org/protobuf/reflect/protoreflect"
 )
 
+const template = `import {NativeModules} from 'react-native';
+
+const {GrpcModule} = NativeModules;
+
+type GrpcModule = {
+    setHost: (host: string) => void;
+    setPort: (port: number) => void;
+	$*methods*$
+};
+
+$*messages*$
+
+export default GrpcModule as GrpcModule;`
+
 var kinds = map[protoreflect.Kind]string{
 	protoreflect.BoolKind:     "boolean",
 	protoreflect.Int32Kind:    "number",
@@ -45,45 +59,42 @@ func generate(plugin *protogen.Plugin, in *protogen.File) error {
 	fileName := "grpcModule.ts"
 	out := plugin.NewGeneratedFile(fileName, in.GoImportPath)
 
-	out.P(`import {NativeModules} from 'react-native';
+	lists := make(map[string][]string)
 
-const {GrpcModule} = NativeModules;
+	generateServices(in.Services, &lists)
 
-type GrpcModule = {
-    setHost: (host: string) => void;
-    setPort: (port: number) => void;`)
+	generateMessages(in.Messages, &lists)
 
-	for _, service := range in.Services {
-		for _, method := range service.Methods {
-			err := generateMethod(method, out)
-			if err != nil {
-				return err
-			}
-		}
-	}
-
-	out.P("}")
-
-	for _, message := range in.Messages {
-		err := generateMessage(message, out)
-		if err != nil {
-			return err
-		}
-	}
-
-	out.P()
-	out.P("export default GrpcModule as GrpcModule;")
+	out.P(formatLists(template, &lists))
 
 	return nil
 }
 
-func generateMessage(message *protogen.Message, out *protogen.GeneratedFile) error {
+func generateServices(services []*protogen.Service, lists *map[string][]string) {
+	for _, service := range services {
+		for _, method := range service.Methods {
+			(*lists)["methods"] = append((*lists)["methods"], generateMethod(method))
+		}
+	}
+}
+
+func generateMessages(messages []*protogen.Message, lists *map[string][]string) {
+	for _, message := range messages {
+		(*lists)["messages"] = append((*lists)["messages"], generateMessage(message))
+	}
+}
+
+func generateMessage(message *protogen.Message) string {
 	variables := make(map[string]string)
 	lists := make(map[string][]string)
 
 	variables["messageName"] = upper(string(message.Desc.Name()))
 
-	// TODO: handle nested messages
+	var nestedMessages string
+	for _, nestedMessage := range message.Messages {
+		nestedMessages += generateMessage(nestedMessage)
+	}
+	variables["nestedMessages"] = nestedMessages
 
 	for _, field := range message.Fields {
 		fieldKind := field.Desc.Kind()
@@ -99,18 +110,19 @@ func generateMessage(message *protogen.Message, out *protogen.GeneratedFile) err
 		lists["fieldNames"] = append(lists["fieldNames"], lower(string(field.Desc.Name())))
 	}
 
-	const template = `export type $messageName$ = {
+	var template = `export type $messageName$ = {
 	$*fieldNames*$: $*fieldTypes*$;
 };`
+	if len(nestedMessages) > 0 {
+		template += `
+		$nestedMessages$`
+	}
 
-	out.P(format(template, &variables, &lists))
-
-	return nil
+	return format(template, &variables, &lists)
 }
 
-func generateMethod(method *protogen.Method, out *protogen.GeneratedFile) error {
+func generateMethod(method *protogen.Method) string {
 	variables := make(map[string]string)
-	lists := make(map[string][]string)
 
 	variables["methodName"] = lower(string(method.Desc.Name()))
 	variables["inputKindLower"] = lower(string(method.Desc.Input().Name()))
@@ -119,84 +131,72 @@ func generateMethod(method *protogen.Method, out *protogen.GeneratedFile) error 
 
 	const template = "\t$methodName$: ($inputKindLower$: $inputKindUpper$) => Promise<$outputKindUpper$>;"
 
-	out.P(format(template, &variables, &lists))
-
-	return nil
+	return formatVariables(template, &variables)
 }
 
-func format(template string, variables *map[string]string, lists *map[string][]string) string {
-	result := strings.Clone(template)
+func formatVariables(template string, variables *map[string]string) string {
+	result := template
 	for key, value := range *variables {
 		result = strings.ReplaceAll(result, "$"+key+"$", value)
-	}
-	for key := range *lists {
-		start := 0
-		for start != -1 {
-			oldStart := start
-			start = strings.Index(result[oldStart:], "$*"+key+"*$")
-			if start == -1 {
-				break
-			}
-			start += oldStart
-			lineStart := strings.LastIndex(result[:start], "\n")
-			if lineStart == -1 {
-				break
-			}
-			lineStart++
-			lineEnd := strings.Index(result[start:], "\n")
-			if lineEnd == -1 {
-				break
-			}
-			lineEnd += start
-			line := result[lineStart:lineEnd]
-
-			var variablesInLine []string
-			var listLength int
-			for i := 0; i < len(line); i++ {
-				if line[i] == '$' && line[i+1] == '*' && i+2 < len(line) {
-					variableStart := i + 2
-					variableEnd := strings.Index(line[variableStart:], "*$")
-					if variableEnd == -1 {
-						continue
-					}
-					variableEnd += variableStart
-					variableName := line[variableStart:variableEnd]
-					variable, ok := (*lists)[variableName]
-					if !ok {
-						continue
-					}
-					if contains(variablesInLine, variableName) {
-						continue
-					}
-					if variableLen := len(variable); listLength == 0 || listLength > variableLen {
-						listLength = variableLen
-					}
-					variablesInLine = append(variablesInLine, variableName)
-				}
-			}
-
-			var formattedLine string
-			for i := 0; i < listLength; i++ {
-				currentLine := strings.Clone(line)
-				for j := 0; j < len(variablesInLine); j++ {
-					currentLine = strings.ReplaceAll(currentLine, "$*"+variablesInLine[j]+"*$", (*lists)[variablesInLine[j]][i])
-				}
-				if i != 0 {
-					formattedLine += "\n"
-				}
-				formattedLine += currentLine
-			}
-			result = strings.ReplaceAll(result, line, formattedLine)
-		}
 	}
 	return result
 }
 
-func lower(str string) string {
-	if len(str) == 0 {
-		return str
+func formatLists(template string, lists *map[string][]string) string {
+	lines := strings.Split(template, "\n")
+	resultLines := strings.Builder{}
+
+	for i, line := range lines {
+		var start int
+		lineAmount := -1
+		lineVariables := make(map[string][]string)
+		for start != -1 {
+			oldStart := start
+			start = strings.Index(line[start:], "$*")
+			if start == -1 {
+				break
+			}
+			start += oldStart
+
+			end := strings.Index(line[start:], "*$")
+			if end == -1 {
+				break
+			}
+			end += start
+
+			name := line[start+2 : end]
+			if variable, ok := (*lists)[name]; ok {
+				if variableLen := len(variable); lineAmount == -1 || lineAmount > variableLen {
+					lineAmount = variableLen
+				}
+				lineVariables[name] = variable
+			}
+
+			start = end + 2
+		}
+
+		if lineAmount == -1 {
+			lineAmount = 1
+		}
+		for j := 0; j < lineAmount; j++ {
+			currentLine := line
+			for name, value := range lineVariables {
+				currentLine = strings.ReplaceAll(currentLine, "$*"+name+"*$", value[j])
+			}
+			if i > 0 {
+				resultLines.WriteByte('\n')
+			}
+			resultLines.WriteString(currentLine)
+		}
 	}
-	return strings.ToLower(str[:1]) + str[1:]
+
+	return resultLines.String()
+}
+
+func format(template string, variables *map[string]string, lists *map[string][]string) string {
+	result := formatVariables(template, variables)
+	result = formatLists(result, lists)
+	return result
 }
 
 func upper(str string) string {
@@ -206,11 +206,9 @@ func upper(str string) string {
 	return strings.ToUpper(str[:1]) + str[1:]
 }
 
-func contains(values []string, value string) bool {
-	for _, v := range values {
-		if v == value {
-			return true
-		}
+func lower(str string) string {
+	if len(str) == 0 {
+		return str
 	}
-	return false
+	return strings.ToLower(str[:1]) + str[1:]
 }
