@@ -114,8 +114,7 @@ func generateMessage(message *protogen.Message) string {
 	$*fieldNames*$: $*fieldTypes*$;
 };`
 	if len(nestedMessages) > 0 {
-		template += `
-		$nestedMessages$`
+		template += "\n$nestedMessages$"
 	}
 
 	return format(template, &variables, &lists)
