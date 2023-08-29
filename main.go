@@ -128,7 +128,7 @@ func generateMethod(method *protogen.Method) string {
 	variables["inputKindUpper"] = upper(string(method.Desc.Input().Name()))
 	variables["outputKindUpper"] = upper(string(method.Desc.Output().Name()))
 
-	const template = "\t$methodName$: ($inputKindLower$: $inputKindUpper$) => Promise<$outputKindUpper$>;"
+	const template = "$methodName$: ($inputKindLower$: $inputKindUpper$) => Promise<$outputKindUpper$>;"
 
 	return formatVariables(template, &variables)
 }
